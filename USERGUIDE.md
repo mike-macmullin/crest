@@ -157,8 +157,6 @@ Crest supports rendering any shape into these textures. To add some shape, add s
 
 There is an example in the *boat.unity* scene, gameobject *wp0*, where a smoothstep bump is added to the water shape. This is an efficient way to generate dynamic shape. This renders with additive blend, but other blending modes are possible such as alpha blend, multiplicative blending, and min or max blending, which give powerful control over the shape.
 
-The final shape textures are copied back to the CPU to provide collision information for physics etc, using the *ReadbackLodData* script.
-
 The animated waves sim can be configured by assigning an Animated Waves Sim Settings asset to the OceanRenderer script in your scene (*Create/Crest/Animated Wave Sim Settings*). The waves will be dampened/attenuated in shallow water if a *Sea Floor Depth* LOD data is used (see below). The amount that waves are attenuated is configurable using the *Attenuation In Shallows* setting.
 
 
@@ -267,30 +265,29 @@ This is the default and recommended choice.
 Query positions are uploaded to a compute shader which then samples the ocean data and returns the desired results.
 The result of the query accurately tracks the height of the surface, including all shape deformations and waves.
 
-This system does not require detailed configuration and has the best performance characteristics.
+Using the GPU to perform the queries is efficient, but the results can take a couple of frames to return to the CPU. This has a few non-trivial impacts on how it must be used.
+
+Firstly, queries need to be registered with an ID so that the results can be tracked and retrieved from the GPU later.
+This ID needs to be globally unique, and therefore should be acquired by calling *GetHashCode()* on an object/component which will be guaranteed to be unique.
+**Queries should only be made once per frame from an owner - querying a second time using the same ID will stomp over the last query points**.
+A primary reason why *SampleHeightHelper* is useful is that it is an object in itself and there can pass its own ID, hiding this complexity from the user.
+
+Secondly, even if only a one-time query of the height is needed, the query function should be called every frame until it indicates that the results were successfully retrieved.
+See *SampleHeightHelper* and its usages in the code - its *Sample()* function should be called until it returns true.
+Posting the query and polling for its result are done through the same function.
+
+Finally due to the above properties, the number of query points posted from a particular owner should be kept consistent across frames.
+The helper classes always submit a fixed number of points this frame, so satisfy this criteria.
 
 ## Gerstner Waves CPU
 
 This collision option is serviced directly by the *GerstnerWavesBatched* component which implements the *ICollProvider* interface, check this interface to see functionality.
 This sums over all waves to compute displacements, normals, velocities, etc. In contrast to the displacement textures the horizontal range of this collision source is unlimited.
 
-This avoids some of the complexity of using the displacement textures described above, but comes at a CPU cost.
+A drawback of this approach is the CPU performance cost of evaluating the waves.
 It also does not include wave attenuation from water depth or any custom rendered shape.
 A final limitation is the current system finds the first GerstnerWavesBatched component in the scene which may or may not be the correct one.
 The system does not support cross blending of multiple scripts.
-
-## Ocean Displacement Textures GPU (DEPRECATED)
-
-This collision source copies the displacement textures from the GPU to the CPU.
-It does so asynchronously and the data typically takes 2-3 frames to arrive.
-This is the default collision source and gives the final ocean shape, including any bespoke shape rendering, attenuation from water depth, and any other effects.
-
-It uses memory bandwidth to transfer this data and CPU time to take a copy of it once it arrives, so it is best to limit the number of textures copied.
-If you know in advance the limits of the minimum spatial lengths you will be requesting, set these on the *Animated Waves Sim Settings* using the *Min Object Width* and *Max Object Width* fields.
-
-As described above the displacements are arranged as cascaded textures which shift based on the elevation of the viewpoint.
-This complicates matters significantly as the requested resolutions may or may not exist at different times.
-Call *ICollProvider.CheckAvailability()* at run-time to check for issues and perform validation.
 
 ## Technical Notes
 
