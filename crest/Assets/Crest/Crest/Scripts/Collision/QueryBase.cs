@@ -18,7 +18,7 @@ namespace Crest
     /// the data and then transferring back the results asynchronously. An exception to this is water surface velocities - these can
     /// not be computed on the GPU and are instead computed on the CPU by retaining last frames' query results and computing finite diffs.
     /// </summary>
-    public abstract class QueryBase : MonoBehaviour
+    public abstract class QueryBase
     {
         protected int _kernelHandle;
 
@@ -189,6 +189,32 @@ namespace Crest
             InvalidDtForVelocity = 16,
         }
 
+        public QueryBase()
+        {
+            _dataArrivedAction = new System.Action<AsyncGPUReadbackRequest>(DataArrived);
+
+            if (_maxQueryCount != OceanRenderer.Instance._lodDataAnimWaves.Settings.MaxQueryCount)
+            {
+                _maxQueryCount = OceanRenderer.Instance._lodDataAnimWaves.Settings.MaxQueryCount;
+                _queryPosXZ_minGridSize = new Vector3[_maxQueryCount];
+            }
+
+            _computeBufQueries = new ComputeBuffer(_maxQueryCount, 12, ComputeBufferType.Default);
+            _computeBufResults = new ComputeBuffer(_maxQueryCount, 12, ComputeBufferType.Default);
+
+            _queryResults = new NativeArray<Vector3>(_maxQueryCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            _queryResultsLast = new NativeArray<Vector3>(_maxQueryCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+
+            _shaderProcessQueries = ComputeShaderHelpers.LoadShader(QueryShaderName);
+            if (_shaderProcessQueries == null)
+            {
+                Debug.LogError($"Could not load Query compute shader {QueryShaderName}");
+                return;
+            }
+            _kernelHandle = _shaderProcessQueries.FindKernel(QueryKernelName);
+            _wrapper = new PropertyWrapperComputeStandalone(_shaderProcessQueries, _kernelHandle);
+        }
+
         protected abstract void BindInputsAndOutputs(PropertyWrapperComputeStandalone wrapper, ComputeBuffer resultsBuffer);
 
         /// <summary>
@@ -197,6 +223,12 @@ namespace Crest
         /// </summary>
         protected bool UpdateQueryPoints(int i_ownerHash, float i_minSpatialLength, Vector3[] queryPoints, Vector3[] queryNormals)
         {
+            if (queryPoints.Length + _segmentRegistrarRingBuffer.Current._numQueries > _maxQueryCount)
+            {
+                Debug.LogError($"Max query count ({_maxQueryCount}) exceeded, increase the max query count in the Animated Waves Settings to support a higher number of queries.");
+                return false;
+            }
+
             var segmentRetrieved = false;
             Vector2Int segment;
 
@@ -228,7 +260,7 @@ namespace Crest
             {
                 if (_segmentRegistrarRingBuffer.Current._segments.Count >= s_maxGuids)
                 {
-                    Debug.LogError("Too many guids registered with CollProviderCompute. Increase s_maxGuids.", this);
+                    Debug.LogError("Too many guids registered with CollProviderCompute. Increase s_maxGuids.");
                     return false;
                 }
 
@@ -248,7 +280,7 @@ namespace Crest
 
             if (countPts + segment.x > _queryPosXZ_minGridSize.Length)
             {
-                Debug.LogError("Too many wave height queries. Increase Max Query Count in the Animated Waves Settings.", this);
+                Debug.LogError("Too many wave height queries. Increase Max Query Count in the Animated Waves Settings.");
                 return false;
             }
 
@@ -403,19 +435,14 @@ namespace Crest
             return 0;
         }
 
-        // This needs to run in Update()
-        // - It needs to run before OceanRenderer.LateUpdate, because the latter will change the LOD positions/scales, while we will read
-        // the last frames displacements.
-        // - It should run after FixedUpdate, as physics objects will update query points there. Also it computes the displacement timestamps
-        // using Time.time and Time.deltaTime, which would be incorrect if it were in FixedUpdate.
-        void Update()
+        public void UpdateQueries()
         {
             if (_segmentRegistrarRingBuffer.Current._numQueries > 0)
             {
                 ExecuteQueries();
 
                 // Remove oldest requests if we have hit the limit
-                while (_requests.Count >= _maxQueryCount)
+                while (_requests.Count >= s_maxRequests)
                 {
                     _requests.RemoveAt(0);
                 }
@@ -436,7 +463,7 @@ namespace Crest
             _shaderProcessQueries.SetBuffer(_kernelHandle, sp_queryPositions_minGridSizes, _computeBufQueries);
             BindInputsAndOutputs(_wrapper, _computeBufResults);
 
-            var numGroups = (int)Mathf.Ceil((float)_segmentRegistrarRingBuffer.Current._numQueries / (float)s_computeGroupSize) * s_computeGroupSize;
+            var numGroups = (_segmentRegistrarRingBuffer.Current._numQueries + s_computeGroupSize - 1) / s_computeGroupSize;
             _shaderProcessQueries.Dispatch(_kernelHandle, numGroups, 1, 1);
         }
 
@@ -491,33 +518,7 @@ namespace Crest
             }
         }
 
-        protected virtual void OnEnable()
-        {
-            _dataArrivedAction = new System.Action<AsyncGPUReadbackRequest>(DataArrived);
-
-            if (_maxQueryCount != OceanRenderer.Instance._lodDataAnimWaves.Settings.MaxQueryCount)
-            {
-                _maxQueryCount = OceanRenderer.Instance._lodDataAnimWaves.Settings.MaxQueryCount;
-                _queryPosXZ_minGridSize = new Vector3[_maxQueryCount];
-            }
-
-            _computeBufQueries = new ComputeBuffer(_maxQueryCount, 12, ComputeBufferType.Default);
-            _computeBufResults = new ComputeBuffer(_maxQueryCount, 12, ComputeBufferType.Default);
-
-            _queryResults = new NativeArray<Vector3>(_maxQueryCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
-            _queryResultsLast = new NativeArray<Vector3>(_maxQueryCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
-
-            _shaderProcessQueries = ComputeShaderHelpers.LoadShader(QueryShaderName);
-            if (_shaderProcessQueries == null)
-            {
-                enabled = false;
-                return;
-            }
-            _kernelHandle = _shaderProcessQueries.FindKernel(QueryKernelName);
-            _wrapper = new PropertyWrapperComputeStandalone(_shaderProcessQueries, _kernelHandle);
-        }
-
-        protected virtual void OnDisable()
+        public void CleanUp()
         {
             _computeBufQueries.Dispose();
             _computeBufResults.Dispose();
