@@ -171,6 +171,8 @@ Shader "Crest/Ocean"
 		[Header(Clip Surface)]
 		// Discards ocean surface pixels. Requires 'Create Clip Surface Data' enabled on OceanRenderer script.
 		[Toggle] _ClipSurface("Enable", Float) = 0
+		// Clips purely based on water depth
+		[Toggle] _ClipUnderTerrain("Clip Below Terrain (Requires depth cache)", Float) = 0
 
 		[Header(Debug Options)]
 		// Build shader with debug info which allows stepping through the code in a GPU debugger. I typically use RenderDoc or
@@ -215,29 +217,30 @@ Shader "Crest/Ocean"
 			#pragma multi_compile_fog
 			#pragma multi_compile_instancing
 
-			#pragma shader_feature _APPLYNORMALMAPPING_ON
-			#pragma shader_feature _COMPUTEDIRECTIONALLIGHT_ON
-			#pragma shader_feature _DIRECTIONALLIGHTVARYROUGHNESS_ON
-			#pragma shader_feature _SUBSURFACESCATTERING_ON
-			#pragma shader_feature _SUBSURFACESHALLOWCOLOUR_ON
-			#pragma shader_feature _TRANSPARENCY_ON
-			#pragma shader_feature _CAUSTICS_ON
-			#pragma shader_feature _FOAM_ON
-			#pragma shader_feature _FOAM3DLIGHTING_ON
-			#pragma shader_feature _PLANARREFLECTIONS_ON
-			#pragma shader_feature _OVERRIDEREFLECTIONCUBEMAP_ON
+			#pragma shader_feature_local _APPLYNORMALMAPPING_ON
+			#pragma shader_feature_local _COMPUTEDIRECTIONALLIGHT_ON
+			#pragma shader_feature_local _DIRECTIONALLIGHTVARYROUGHNESS_ON
+			#pragma shader_feature_local _SUBSURFACESCATTERING_ON
+			#pragma shader_feature_local _SUBSURFACESHALLOWCOLOUR_ON
+			#pragma shader_feature_local _TRANSPARENCY_ON
+			#pragma shader_feature_local _CAUSTICS_ON
+			#pragma shader_feature_local _FOAM_ON
+			#pragma shader_feature_local _FOAM3DLIGHTING_ON
+			#pragma shader_feature_local _PLANARREFLECTIONS_ON
+			#pragma shader_feature_local _OVERRIDEREFLECTIONCUBEMAP_ON
 
-			#pragma shader_feature _PROCEDURALSKY_ON
-			#pragma shader_feature _UNDERWATER_ON
-			#pragma shader_feature _FLOW_ON
-			#pragma shader_feature _SHADOWS_ON
-			#pragma shader_feature _CLIPSURFACE_ON
+			#pragma shader_feature_local _PROCEDURALSKY_ON
+			#pragma shader_feature_local _UNDERWATER_ON
+			#pragma shader_feature_local _FLOW_ON
+			#pragma shader_feature_local _SHADOWS_ON
+			#pragma shader_feature_local _CLIPSURFACE_ON
+			#pragma shader_feature_local _CLIPUNDERTERRAIN_ON
 
-			#pragma shader_feature _DEBUGDISABLESHAPETEXTURES_ON
-			#pragma shader_feature _DEBUGVISUALISESHAPESAMPLE_ON
-			#pragma shader_feature _DEBUGVISUALISEFLOW_ON
-			#pragma shader_feature _DEBUGDISABLESMOOTHLOD_ON
-			#pragma shader_feature _COMPILESHADERWITHDEBUGINFO_ON
+			#pragma shader_feature_local _DEBUGDISABLESHAPETEXTURES_ON
+			#pragma shader_feature_local _DEBUGVISUALISESHAPESAMPLE_ON
+			#pragma shader_feature_local _DEBUGVISUALISEFLOW_ON
+			#pragma shader_feature_local _DEBUGDISABLESMOOTHLOD_ON
+			#pragma shader_feature_local _COMPILESHADERWITHDEBUGINFO_ON
 
 			#if _COMPILESHADERWITHDEBUGINFO_ON
 			#pragma enable_d3d11_debug_symbols
@@ -462,6 +465,10 @@ Shader "Crest/Ocean"
 				clipVal = lerp(_CrestClipByDefault, clipVal, wt_smallerLod + wt_biggerLod);
 				// Add 0.5 bias for LOD blending and texel resolution correction. This will help to tighten and smooth clipped edges
 				clip(-clipVal + 0.5);
+				#endif
+
+				#if _CLIPUNDERTERRAIN_ON
+				clip(input.lodAlpha_worldXZUndisplaced_oceanDepth.w + 2.0);
 				#endif
 
 				half3 view = normalize(_WorldSpaceCameraPos - input.worldPos);

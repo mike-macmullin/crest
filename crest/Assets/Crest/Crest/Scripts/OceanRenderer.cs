@@ -712,8 +712,7 @@ namespace Crest
         {
             _sampleHeightHelper.Init(Viewpoint.position, 0f, true);
 
-            float waterHeight = 0f;
-            _sampleHeightHelper.Sample(ref waterHeight);
+            _sampleHeightHelper.Sample(out var waterHeight);
 
             ViewerHeightAboveWater = Viewpoint.position.y - waterHeight;
         }
@@ -1097,7 +1096,7 @@ namespace Crest
                 _simSettingsAnimatedWaves.Validate(ocean, showMessage);
             }
 
-            if(transform.eulerAngles.magnitude > 0.0001f)
+            if (transform.eulerAngles.magnitude > 0.0001f)
             {
                 showMessage
                 (
