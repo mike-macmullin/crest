@@ -24,4 +24,4 @@ jobs:
         # The title of the pull request
         pr_title: Fork Sync
         # The message in the pull request
-        pr_message: 'Update fork'
+        pr_message: 'Update from fork'
